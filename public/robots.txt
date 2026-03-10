@@ -1,0 +1,11 @@
+User-agent: *
+Allow: /
+Disallow: /dashboard
+Disallow: /create
+Disallow: /chat/
+Disallow: /call/
+Disallow: /profile/
+Disallow: /account
+Disallow: /api/
+
+Sitemap: https://talktoyouai.com/sitemap.xml
