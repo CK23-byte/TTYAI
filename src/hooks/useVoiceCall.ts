@@ -16,17 +16,30 @@ export function useVoiceCall({ personality, onTranscriptUpdate }: UseVoiceCallOp
   const [transcript, setTranscript] = useState<TranscriptEntry[]>([])
 
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null)
+  const mediaStreamRef = useRef<MediaStream | null>(null)
+  const audioElRef = useRef<HTMLAudioElement | null>(null)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const sessionIdRef = useRef<string | null>(null)
+  const transcriptRef = useRef<TranscriptEntry[]>([])
+  const durationRef = useRef(0)
 
   useEffect(() => {
     if (isConnected) {
-      timerRef.current = setInterval(() => setDuration((d) => d + 1), 1000)
+      timerRef.current = setInterval(() => {
+        setDuration((d) => {
+          durationRef.current = d + 1
+          return d + 1
+        })
+      }, 1000)
     }
     return () => {
       if (timerRef.current) clearInterval(timerRef.current)
     }
   }, [isConnected])
+
+  useEffect(() => {
+    transcriptRef.current = transcript
+  }, [transcript])
 
   const startCall = useCallback(async () => {
     if (!session?.access_token) {
@@ -64,9 +77,11 @@ export function useVoiceCall({ personality, onTranscriptUpdate }: UseVoiceCallOp
 
       const audioEl = document.createElement('audio')
       audioEl.autoplay = true
+      audioElRef.current = audioEl
       pc.ontrack = (e) => { audioEl.srcObject = e.streams[0] }
 
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      mediaStreamRef.current = stream
       stream.getTracks().forEach((track) => pc.addTrack(track, stream))
 
       const dc = pc.createDataChannel('oai-events')
@@ -129,6 +144,18 @@ export function useVoiceCall({ personality, onTranscriptUpdate }: UseVoiceCallOp
   }, [session, personality, onTranscriptUpdate])
 
   const endCall = useCallback(async () => {
+    // Stop all media tracks (release microphone)
+    if (mediaStreamRef.current) {
+      mediaStreamRef.current.getTracks().forEach((track) => track.stop())
+      mediaStreamRef.current = null
+    }
+
+    // Clean up audio element
+    if (audioElRef.current) {
+      audioElRef.current.srcObject = null
+      audioElRef.current = null
+    }
+
     if (peerConnectionRef.current) {
       peerConnectionRef.current.close()
       peerConnectionRef.current = null
@@ -150,8 +177,8 @@ export function useVoiceCall({ personality, onTranscriptUpdate }: UseVoiceCallOp
           },
           body: JSON.stringify({
             sessionId: sessionIdRef.current,
-            transcript,
-            durationSeconds: duration,
+            transcript: transcriptRef.current,
+            durationSeconds: durationRef.current,
           }),
         })
       } catch {
@@ -160,9 +187,10 @@ export function useVoiceCall({ personality, onTranscriptUpdate }: UseVoiceCallOp
     }
 
     sessionIdRef.current = null
+    durationRef.current = 0
     setDuration(0)
     setTranscript([])
-  }, [session, transcript, duration])
+  }, [session])
 
   return {
     isConnected,

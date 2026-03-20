@@ -27,11 +27,11 @@ export default function ProfilePage() {
         .update({ text_notes: updatedNotes })
         .eq('id', profileData.id)
     } else {
-      await supabase.from('profile_data').insert({
+      await supabase.from('profile_data').upsert({
         user_id: user.id,
         personality_id: profileId,
         text_notes: updatedNotes,
-      })
+      }, { onConflict: 'user_id,personality_id' })
     }
     setNewNote('')
     await refetch()
@@ -71,11 +71,11 @@ export default function ProfilePage() {
       if (profileData) {
         await supabase.from('profile_data').update({ voice_samples: updatedSamples }).eq('id', profileData.id)
       } else {
-        await supabase.from('profile_data').insert({
+        await supabase.from('profile_data').upsert({
           user_id: user.id,
           personality_id: profileId,
           voice_samples: updatedSamples,
-        })
+        }, { onConflict: 'user_id,personality_id' })
       }
       await refetch()
     }
@@ -230,7 +230,7 @@ export default function ProfilePage() {
                         if (profileData) {
                           await supabase.from('profile_data').update({ photos: updated }).eq('id', profileData.id)
                         } else {
-                          await supabase.from('profile_data').insert({ user_id: user.id, personality_id: profileId, photos: updated })
+                          await supabase.from('profile_data').upsert({ user_id: user.id, personality_id: profileId, photos: updated }, { onConflict: 'user_id,personality_id' })
                         }
                         await refetch()
                       }

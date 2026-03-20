@@ -37,23 +37,28 @@ export function CreditProvider({ children }: { children: ReactNode }) {
   const deductCredits = useCallback(async (amount: number, creditType: string, description: string) => {
     if (!session?.access_token) return { success: false, remaining: 0 }
 
-    const res = await fetch('/api/credits/deduct', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${session.access_token}`,
-      },
-      body: JSON.stringify({
-        userId: profile?.id,
-        amount,
-        creditType,
-        description,
-      }),
-    })
+    try {
+      const res = await fetch('/api/credits/deduct', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          userId: profile?.id,
+          amount,
+          creditType,
+          description,
+        }),
+      })
 
-    const data = await res.json()
-    if (data.success) await refreshProfile()
-    return data
+      if (!res.ok) return { success: false, remaining: 0 }
+      const data = await res.json()
+      if (data.success) await refreshProfile()
+      return data
+    } catch {
+      return { success: false, remaining: 0 }
+    }
   }, [session, profile, refreshProfile])
 
   const refreshCredits = useCallback(async () => {

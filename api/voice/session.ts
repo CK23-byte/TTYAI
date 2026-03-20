@@ -16,14 +16,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const { data: { user }, error: authError } = await supabase.auth.getUser(token)
   if (authError || !user || user.id !== userId) return res.status(401).json({ error: 'Unauthorized' })
 
-  // Deduct initial 25 credits (1 minute)
-  const { data: creditResult } = await supabase.rpc('deduct_credits', {
-    p_user_id: userId,
-    p_amount: 25,
-    p_credit_type: 'universal',
-    p_description: 'Voice call (1 min)',
-  })
-  if (!creditResult?.[0]?.success) return res.status(402).json({ error: 'Insufficient credits' })
+  // Check credits first (without deducting)
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('credits, voice_credits')
+    .eq('id', userId)
+    .single()
+  if (!profile || (profile.credits < 25 && profile.voice_credits < 25)) {
+    return res.status(402).json({ error: 'Insufficient credits (need 25 for voice call)' })
+  }
 
   // Get personality for system prompt
   const { data: personality } = await supabase
@@ -37,33 +38,50 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // Determine voice
   let voice = 'alloy'
   if (voiceConfig?.type === 'cloned' && voiceConfig?.clonedVoiceId) {
-    voice = voiceConfig.clonedVoiceId
+    voice = String(voiceConfig.clonedVoiceId).slice(0, 100)
   } else if (voiceConfig?.standardVoice) {
-    voice = voiceConfig.standardVoice
+    voice = String(voiceConfig.standardVoice).slice(0, 50)
   }
 
   // Create OpenAI Realtime session
-  const openaiRes = await fetch('https://api.openai.com/v1/realtime/sessions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
-    },
-    body: JSON.stringify({
-      model: 'gpt-4o-realtime-preview',
-      voice,
-      instructions: personality.system_prompt || `You are ${personality.name}, the user's ${personality.relationship}. Be warm and authentic.`,
-      input_audio_transcription: { model: 'whisper-1' },
-    }),
-  })
+  let sessionData: any
+  try {
+    const openaiRes = await fetch('https://api.openai.com/v1/realtime/sessions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: 'gpt-4o-realtime-preview',
+        voice,
+        instructions: personality.system_prompt || `You are ${personality.name}, the user's ${personality.relationship}. Be warm and authentic.`,
+        input_audio_transcription: { model: 'whisper-1' },
+      }),
+    })
 
-  if (!openaiRes.ok) {
-    const errText = await openaiRes.text()
-    console.error('OpenAI Realtime error:', errText)
-    return res.status(500).json({ error: 'Failed to create voice session' })
+    if (!openaiRes.ok) {
+      const errText = await openaiRes.text()
+      console.error('OpenAI Realtime error:', errText)
+      return res.status(500).json({ error: 'Failed to create voice session' })
+    }
+
+    sessionData = await openaiRes.json()
+  } catch (err) {
+    console.error('OpenAI Realtime network error:', err)
+    return res.status(500).json({ error: 'Voice service unavailable' })
   }
 
-  const sessionData = await openaiRes.json()
+  // Deduct credits AFTER successful OpenAI session creation
+  const { data: creditResult } = await supabase.rpc('deduct_credits', {
+    p_user_id: userId,
+    p_amount: 25,
+    p_credit_type: 'universal',
+    p_description: 'Voice call (1 min)',
+  })
+  if (!creditResult?.[0]?.success) {
+    return res.status(402).json({ error: 'Insufficient credits' })
+  }
 
   // Record voice session
   const { data: voiceSession } = await supabase.from('voice_sessions').insert({

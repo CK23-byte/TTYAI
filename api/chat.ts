@@ -22,7 +22,16 @@ function checkRateLimit(userId: string): boolean {
   return true
 }
 
+function setCorsHeaders(res: VercelResponse) {
+  const origin = process.env.ALLOWED_ORIGIN || 'https://talktoyouai.com'
+  res.setHeader('Access-Control-Allow-Origin', origin)
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS')
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  setCorsHeaders(res)
+  if (req.method === 'OPTIONS') return res.status(200).end()
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
 
   const authHeader = req.headers.authorization
@@ -41,15 +50,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const { data: { user }, error: authError } = await supabase.auth.getUser(token)
   if (authError || !user || user.id !== userId) return res.status(401).json({ error: 'Unauthorized' })
 
-  // Deduct credit
-  const { data: creditResult } = await supabase.rpc('deduct_credits', {
-    p_user_id: userId,
-    p_amount: 1,
-    p_credit_type: 'universal',
-    p_description: 'Text message',
-  })
-  if (!creditResult?.[0]?.success) return res.status(402).json({ error: 'Insufficient credits' })
-
   // Get personality
   const { data: personality } = await supabase
     .from('personality_profiles')
@@ -58,6 +58,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     .eq('user_id', userId)
     .single()
   if (!personality) return res.status(404).json({ error: 'Profile not found' })
+
+  // Check credits (without deducting yet)
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('credits, text_credits')
+    .eq('id', userId)
+    .single()
+  if (!profile || (profile.credits < 1 && profile.text_credits < 1)) {
+    return res.status(402).json({ error: 'Insufficient credits' })
+  }
 
   // Get recent messages for context
   const { data: recentMessages } = await supabase
@@ -74,33 +84,48 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }))
 
   // Call Claude API
-  const claudeRes = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': process.env.ANTHROPIC_API_KEY!,
-      'anthropic-version': '2023-06-01',
-    },
-    body: JSON.stringify({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 1024,
-      system: personality.system_prompt || `You are ${personality.name}, the user's ${personality.relationship}. Be warm and authentic.`,
-      messages: [
-        ...conversationHistory,
-        { role: 'user', content: message.trim() },
-      ],
-    }),
-  })
+  let claudeData: any
+  try {
+    const claudeRes = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': process.env.ANTHROPIC_API_KEY!,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 1024,
+        system: personality.system_prompt || `You are ${personality.name}, the user's ${personality.relationship}. Be warm and authentic.`,
+        messages: [
+          ...conversationHistory,
+          { role: 'user', content: message.trim() },
+        ],
+      }),
+    })
 
-  if (!claudeRes.ok) {
-    const errText = await claudeRes.text()
-    console.error('Claude API error:', errText)
-    return res.status(500).json({ error: 'AI service error' })
+    if (!claudeRes.ok) {
+      const errText = await claudeRes.text()
+      console.error('Claude API error:', errText)
+      return res.status(500).json({ error: 'AI service error' })
+    }
+
+    claudeData = await claudeRes.json()
+  } catch (err) {
+    console.error('Claude API network error:', err)
+    return res.status(500).json({ error: 'AI service unavailable' })
   }
 
-  const claudeData = await claudeRes.json()
   const responseText = claudeData.content?.[0]?.text || 'I could not generate a response.'
   const tokensUsed = (claudeData.usage?.input_tokens || 0) + (claudeData.usage?.output_tokens || 0)
+
+  // Deduct credit AFTER successful AI response
+  const { data: creditResult } = await supabase.rpc('deduct_credits', {
+    p_user_id: userId,
+    p_amount: 1,
+    p_credit_type: 'universal',
+    p_description: 'Text message',
+  })
 
   // Save both messages
   await supabase.from('chat_messages').insert([
@@ -134,6 +159,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   return res.status(200).json({
     response: responseText,
     tokensUsed,
-    creditsRemaining: creditResult[0].remaining,
+    creditsRemaining: creditResult?.[0]?.remaining ?? 0,
   })
 }

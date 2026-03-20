@@ -166,7 +166,7 @@ export default function LandingPage() {
 
         {/* FAQ */}
         <section className="py-20 bg-gradient-to-br from-amber-50 via-orange-50 to-rose-50">
-          <SEOHead title="FAQ" description="" jsonLd={faqJsonLd} />
+          <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(faqJsonLd) }} />
           <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8">
             <h2 className="text-3xl font-bold text-center text-gray-900">Frequently Asked Questions</h2>
             <div className="mt-12 space-y-6">
