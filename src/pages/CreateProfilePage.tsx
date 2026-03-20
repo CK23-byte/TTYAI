@@ -35,11 +35,15 @@ export default function CreateProfilePage() {
 
   async function handleCreate() {
     if (!user) return
+    const personName = (selectedPerson || name).trim()
+    if (!personName || !relationship) {
+      setError('Name and relationship are required')
+      return
+    }
     setLoading(true)
     setError('')
 
     try {
-      const personName = selectedPerson || name
       const { messages } = parseWhatsAppExport(fileContent)
       const systemPrompt = buildSystemPrompt(personName, relationship, messages)
 

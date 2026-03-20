@@ -14,8 +14,11 @@ export default function ContactPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setSending(true)
-    // In production, this would call an API endpoint to send the email
-    await new Promise((resolve) => setTimeout(resolve, 1000))
+
+    // Send via mailto as fallback until API endpoint is configured
+    const mailtoUrl = `mailto:support@talktoyouai.com?subject=${encodeURIComponent(`[${subject}] Contact from ${name}`)}&body=${encodeURIComponent(`From: ${name} (${email})\n\n${message}`)}`
+    window.open(mailtoUrl, '_blank')
+
     setSent(true)
     setSending(false)
   }

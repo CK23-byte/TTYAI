@@ -41,6 +41,24 @@ export function useVoiceCall({ personality, onTranscriptUpdate }: UseVoiceCallOp
     transcriptRef.current = transcript
   }, [transcript])
 
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (mediaStreamRef.current) {
+        mediaStreamRef.current.getTracks().forEach((track) => track.stop())
+      }
+      if (audioElRef.current) {
+        audioElRef.current.srcObject = null
+      }
+      if (peerConnectionRef.current) {
+        peerConnectionRef.current.close()
+      }
+      if (timerRef.current) {
+        clearInterval(timerRef.current)
+      }
+    }
+  }, [])
+
   const startCall = useCallback(async () => {
     if (!session?.access_token) {
       setError('Not authenticated')
@@ -137,6 +155,19 @@ export function useVoiceCall({ personality, onTranscriptUpdate }: UseVoiceCallOp
 
       setIsConnected(true)
     } catch (err) {
+      // Clean up resources on error
+      if (mediaStreamRef.current) {
+        mediaStreamRef.current.getTracks().forEach((track) => track.stop())
+        mediaStreamRef.current = null
+      }
+      if (audioElRef.current) {
+        audioElRef.current.srcObject = null
+        audioElRef.current = null
+      }
+      if (peerConnectionRef.current) {
+        peerConnectionRef.current.close()
+        peerConnectionRef.current = null
+      }
       setError(err instanceof Error ? err.message : 'Failed to start call')
     } finally {
       setIsConnecting(false)
