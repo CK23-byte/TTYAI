@@ -10,17 +10,31 @@ export default function ContactPage() {
   const [message, setMessage] = useState('')
   const [sending, setSending] = useState(false)
   const [sent, setSent] = useState(false)
+  const [error, setError] = useState('')
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setSending(true)
+    setError('')
 
-    // Send via mailto as fallback until API endpoint is configured
-    const mailtoUrl = `mailto:support@talktoyouai.com?subject=${encodeURIComponent(`[${subject}] Contact from ${name}`)}&body=${encodeURIComponent(`From: ${name} (${email})\n\n${message}`)}`
-    window.open(mailtoUrl, '_blank')
+    try {
+      const res = await fetch('/api/contact', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, email, subject, message }),
+      })
 
-    setSent(true)
-    setSending(false)
+      if (!res.ok) {
+        const data = await res.json()
+        throw new Error(data.error || 'Failed to send message')
+      }
+
+      setSent(true)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Something went wrong. Please try again.')
+    } finally {
+      setSending(false)
+    }
   }
 
   return (
@@ -91,6 +105,7 @@ export default function ContactPage() {
                     className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:border-orange-400 focus:ring-2 focus:ring-orange-100 outline-none resize-none"
                   />
                 </div>
+                {error && <p className="text-red-500 text-sm">{error}</p>}
                 <button
                   type="submit"
                   disabled={sending}
